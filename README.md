@@ -27,4 +27,5 @@ stefan.chen@duke.edu
 
 Office hours: TBD
 
-TRY1 ABC 
+TRY1 
+ABCDE
