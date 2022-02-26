@@ -1,0 +1,260 @@
+---
+title: "ENV 790.30 - Time Series Analysis for Energy Data | Spring 2022"
+subtitle: "Assignment 4 - Due date 02/17/22"
+author: "Grace Choi"
+output: pdf_document
+geometry: margin=2.54cm
+editor_options: 
+  chunk_output_type: console
+---
+  
+## Directions
+  
+  You should open the .rmd file corresponding to this assignment on RStudio. The file is available on our class repository on Github. And to do so you will need to fork our repository and link it to your RStudio.  
+
+Once you have the project open the first thing you will do is change "Student Name" on line 3 with your name. 
+Then you will start working through the assignment by  **creating code and output** that answer each question. Be sure to use this assignment document. Your report should contain the answer to each question and any plots/tables you obtained (when applicable).
+
+When you have completed the assignment, **Knit** the text and code into a single PDF file. Rename the pdf file such that it includes your first and last name (e.g., "LuanaLima_TSA_A04_Sp21.Rmd"). Submit this pdf using Sakai. 
+
+R packages needed for this assignment: "xlsx" or "readxl", "ggplot2", "forecast","tseries", and "Kendall". Install these packages, if you haven't done yet. Do not forget to load them before running your script, since they are NOT default packages.\\
+
+```{r}
+#Load/install required package here
+library(xlsx)
+library(readxl)
+library(ggplot2)
+library(tseries)
+library(Kendall)
+library(tseries)
+library(tidyverse)
+library(lubridate)
+library(forecast)
+library(cowplot)
+library(dplyr)
+
+```
+
+## Questions 
+
+Consider the same data you used for A3 from the spreadsheet "Table_10.1_Renewable_Energy_Production_and_Consumption_by_Source.xlsx". The data comes from the US Energy Information and Administration and corresponds to the January 2021 Monthly Energy Review. For this assignment you will work only with the column "Total Renewable Energy Production". 
+
+
+```{r}
+#Importing data set - using xlsx package
+Ener <- read.csv(file="../Data/Table_10.1_Renewable_Energy_Production_and_Consumption_by_Source-Edit.csv")
+raw_data <- read.csv(file="../Data/Table_10.1_Renewable_Energy_Production_and_Consumption_by_Source-Edit.csv")
+raw_data <-raw_data[c(1,4:6)]
+colnames(raw_data)=c("Date","Biomass", "Original", "Hydroelectric")
+raw_data$Date <- ym(raw_data$Date)
+
+Ener <- Ener[c(1:5)]
+colnames(Ener)=c("Date","a","b","c","Renewable")
+
+Ener_processed <-
+  Ener %>%
+  mutate(Date = ym(Date)) %>%
+  arrange(Date)
+
+head(Ener,15)
+tail(Ener,15)
+```
+
+
+## Stochastic Trend and Stationarity Tests
+
+### Q1
+
+Difference the "Total Renewable Energy Production" series using function diff(). Function diff() is from package base and take three main arguments:
+* *x* vector containing values to be differenced;
+* *lag* integer indicating with lag to use;
+* *differences* integer indicating how many times series should be differenced.
+
+Try differencing at lag 1 only once, i.e., make `lag=1` and `differences=1`. Plot the differenced series Do the series still seem to have trend?
+
+- The trend alters from an increasing to a decreasing trend. Therefore, a changing direction trend seems to exist.
+
+```{r}
+
+nvar <- ncol(Ener_processed) - 1
+nobs <- nrow(Ener_processed)
+
+ts_energy <- ts(Ener_processed[,2:(nvar+1)],
+               start=c(year(Ener_processed$Date[1]),month(Ener_processed$Date[1])),
+               frequency=12)
+
+head(ts_energy,15)
+decompose_energy <- decompose(ts_energy[,"Renewable"],"additive")
+plot(decompose_energy)
+
+deseasonal_energy <- seasadj(decompose_energy)  
+decompose_energy_diff <- diff(deseasonal_energy,differences=1)
+plot(decompose_energy_diff, main="Differenced")
+
+decompose_df <- data.frame("Differenced"=decompose_energy_diff)
+
+```
+
+### Q2
+
+Now let's compare the differenced series with the detrended series you calculated on A3. In other words, for the "Total Renewable Energy Production" compare the differenced series from Q1 with the series you detrended in A3 using linear regression. (Hint: Just copy and paste part of your code for A3)
+
+Copy and paste part of your code for A3 where you compute regression for Total Energy Production and the detrended Total Energy Production
+
+```{r}
+##previous.
+beta = matrix(ncol=2, nrow=1)
+colnames(beta)=c("beta0", "beta1")
+
+nobs_raw <- nrow(raw_data)
+t = c(1:nobs_raw)
+
+linear_trend_model=lm(raw_data[,3]~t)
+print(summary(linear_trend_model))
+beta[1,1] = as.numeric(linear_trend_model$coefficients[1])
+beta[1,2] = as.numeric(linear_trend_model$coefficients[2])
+
+detrend_raw_data2 <- raw_data[,3]-(beta[1,1]+beta[1,2]*t)
+prep_data <- data.frame("Detrend"=detrend_raw_data2)
+
+
+
+###diff and detrended
+dif <- raw_data[c(1,3)]
+dfff<-
+dif %>%
+cbind(Differenced = c(NA,as.numeric(decompose_energy_diff))) %>%
+na.omit(residentialDiff)
+print("Differenced and Detrended")
+
+Plot1<-ggplot(dfff, aes(x=Date, y=dfff[,3])) +
+geom_line(color="blue") +
+ylab(paste0("Inflow ",colnames(dfff),sep="")) +
+geom_smooth(color="red",method="lm") + ylab(label="Differenced")
+
+Plot2<- ggplot(raw_data, aes(x=Date, y=raw_data[,3])) +
+  geom_line(aes(y=detrend_raw_data2), col="green")+
+  geom_smooth(aes(y=detrend_raw_data2),color="orange",method="lm") + ylab(label="Detrended")
+
+cowplot::plot_grid(Plot1,Plot2,nrow=2)
+
+```
+
+### Q3
+Create a data frame with 4 columns: month, original series, detrended by Regression Series and differenced series. Make sure you properly name all columns. Also note that the differenced series will have only 584 rows because you loose the first observation when differencing. Therefore, you need to remove the first observations for the original series and the detrended by regression series to build the new data frame.
+
+```{r}
+#Data frame - remember to note include January 1973
+
+df <- raw_data[c(1,3)]
+
+df4<-
+  df %>% 
+  cbind(Detrended=prep_data) %>% 
+  cbind(Differenced = c(NA,as.numeric(decompose_energy_diff))) %>% 
+  na.omit(residentialDiff)
+
+head(df4,5)
+```
+
+### Q4
+Using ggplot() create a line plot that shows the three series together. Make sure you add a legend to the plot.
+
+```{r}
+#Use ggplot
+
+ggplot(df4, aes(x=Date))+
+  geom_line(aes(y=Original,color="Original"))+
+  geom_line(aes(y=Detrend,color="Detrend"))+
+  geom_line(aes(y=Differenced,color="Differenced"))+
+  labs(color="")+
+  scale_color_manual(values=c("Original" = "black",
+                              "Detrend" =" orange",
+                              "Differenced"="blue"),
+                     labels=c("Original", "Detrend", "Differenced")) +
+  theme(legend.position = "right")+
+  ylab(label="Trends for Total Renewable Energy Production")
+
+```
+
+
+### Q5
+Plot the ACF for the three series and compare the plots. Add the argument `ylim=c(-0.5,1)` to the Acf() function to make sure all three y axis have the same limits. Which method do you think was more efficient in eliminating the trend? The linear regression or differencing?
+
+- Differencing was more efficient in eliminating the trend because there are not many significant spikes for the Differencing Series and everything fall within the blue boundaries of the ACF and PACF plots for the Differencing Series. 
+
+```{r}
+#Compare ACFs
+par(mfrow=c(1,2)) 
+Acf(df$Original,lag.max=40,main="Original",ylim=c(-0.5,1))
+Pacf(df$Original,lag.max=40,main="Original",ylim=c(-0.5,1))
+
+par(mfrow=c(1,2)) 
+Acf(df4$Differenced,lag.max=40,main="Differenced",ylim=c(-0.5,1))
+Pacf(df4$Differenced,lag.max=40,main="Differenced",ylim=c(-0.5,1))
+
+par(mfrow=c(1,2)) 
+Acf(df4$Detrend,lag.max=40,main="Detrended", ylim=c(-0.5,1))
+Pacf(df4$Detrend,lag.max=40,main="Detrended", ylim=c(-0.5,1))
+
+```
+
+
+### Q6
+Compute the Seasonal Mann-Kendall and ADF Test for the original "Total Renewable Energy Production" series. Ask R to print the results. Interpret the results for both test. Whats the conclusion from the Seasonal Mann Kendall test? What's the conclusion for the ADF test? Do they match what you observed in Q2? Recall that having a unit root means the series has a stochastic trend. And when a series has stochastic trend we need to use a different procedure to remove the trend.
+
+- Results from the Seasonal Mann-Kendall : A high Score of 9984 and small p value, indicating a trend. The positive Score value indicates a positive trend./
+
+- Results from the ADF Test : The p-value =0.9554 which is greater than 0.05. Therefore, we accept the null hypothesis. The null hypothesis from the ADF test states that our time series has a unit root. Therefore, it has a stochastic trend./ 
+
+- The results from the tests are in agreement with Q2. Q2's lm geom_smooth line increases over time. The slope of the trend line is positive. The graphs from Q2 also indicate that there is a trend. 
+
+```{r}
+
+ts_ener_data <- ts(Ener[,2:5],frequency=12) 
+
+SMKtest <- SeasonalMannKendall(ts_ener_data[,4])
+print(summary(SMKtest))
+
+print((adf.test(deseasonal_energy,alternative="stationary")))
+
+```
+
+### Q7
+
+Aggregate the original "Total Renewable Energy Production" series by year. You can use the same procedure we used in class. Store series in a matrix where rows represent months and columns represent years. And then take the columns mean using function colMeans(). Recall the goal is the remove the seasonal variation from the series to check for trend. 
+
+```{r}
+
+ener_data_matrix<- matrix(Ener_processed[,5],byrow=FALSE,nrow=12)
+inflow_data_yearly <- colMeans(ener_data_matrix)
+
+
+my_year <- c(year(first(Ener_processed$Date)):year(last(Ener_processed$Date)))
+inflow_data_new_yearly <- data.frame(my_year, inflow_data_yearly)
+inflow_data_new_yearly
+
+
+ggplot(inflow_data_new_yearly, aes(x=my_year, y=inflow_data_yearly)) +
+            geom_line(color="blue") +
+            geom_smooth(color="red",method="lm") 
+
+```
+
+### Q8
+
+Apply the Mann Kendal, Spearman correlation rank test and ADF. Are the results from the test in agreement with the test results for the non-aggregated series, i.e., results for Q6?
+
+- Results from the Mann-Kendall Score : The lower Score of 854 is due to less observations. However, the value is still a high number according to the z test, reflecting its significance. Like the results for Q6, the positive score indicates a positive trend. The results from the test is in agreement with the results for Q6. The tau value is slightly higher than Q6. This indicates that the increasing trend is clearer with yearly data than looking at the seasonal component. Similar to Q6, the very low p-value gives our confidence about our tau values./
+
+- Results from the Spearman correlation : Spearman's rho is reported as 0.86. The null hypothesis states that rho=o, which indicates no trend. The alternative = rho is not equal to zero. Reject the null hypothesis and accept the alternative due to the low p value. 
+
+```{r}
+
+print(summary(MannKendall(inflow_data_yearly)))
+
+sp_rho=cor.test(inflow_data_yearly,my_year,method="spearman")
+print(sp_rho)
+
+```
+
